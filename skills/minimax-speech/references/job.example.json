@@ -1,0 +1,26 @@
+{
+  "transport": "http",
+  "model": "speech-2.8-hd",
+  "original_text": "重庆的朋友，欢迎来到我们的新节目。今天，我们把复杂的问题讲清楚。",
+  "direction": "自然亲切的知识讲解，语速稍慢，欢迎语后停顿，不增加原稿中的词。",
+  "text": "重庆的朋友，欢迎来到我们的新节目。<#0.35#>今天，我们把复杂的问题讲清楚。",
+  "voice_id": "male-qn-qingse",
+  "voice_setting": {
+    "speed": 0.95,
+    "vol": 1,
+    "pitch": 0
+  },
+  "language_boost": "Chinese",
+  "text_normalization_mode": "quality",
+  "pronunciation_dict": {
+    "tone": ["重庆/(chong2)(qing4)"]
+  },
+  "audio_setting": {
+    "sample_rate": 32000,
+    "bitrate": 128000,
+    "format": "mp3",
+    "channel": 1
+  },
+  "subtitle_enable": true,
+  "subtitle_type": "sentence"
+}
