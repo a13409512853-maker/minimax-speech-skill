@@ -61,7 +61,7 @@ def collect(root):
 
 def build(root, destination):
     entries = collect(root)
-    manifest = {"version": "1.1.0",
+    manifest = {"version": "1.1.1",
                 "files": {name: hashlib.sha256(data).hexdigest()
                           for name, data in entries.items()}}
     if destination:

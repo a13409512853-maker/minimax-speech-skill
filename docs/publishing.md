@@ -54,14 +54,16 @@ python tools/check_release.py
 
 ## GitHub Release
 
-本次版本标签为 `v1.1.0`。代码通过检查并提交后进入仓库 Releases，在对应提交上创建该标签的 Release，说明：
+本次版本标签为 `v1.1.1`。代码通过检查并提交后进入仓库 Releases，在对应提交上创建该标签的 Release，说明：
 
 > 新增官方文字音色设计、参考音频上传与授权复刻，保存可复用音色配置。保留 Speech 2.8 HD、HTTP/WebSocket、声音控制、字幕和本地系统加密凭据。首次使用需要自己的官方 API Key；附件不含维护者密钥。41项本机测试通过，本次未调用收费创建接口。Windows 加密已验证，macOS/Linux 实际密钥库仍待对应平台验证。
+
+v1.1.1还修正了 Windows 短路径、macOS 目录别名导致的测试误报；不覆盖或移动已发布的 v1.1.0 标签与附件。
 
 可以使用 GitHub 自动生成的 Source code ZIP，或构建带 SHA256 清单的附件：
 
 ```text
-python tools/check_release.py --zip dist/minimax-speech-skill-v1.1.0.zip
+python tools/check_release.py --zip dist/minimax-speech-skill-v1.1.1.zip
 ```
 
 上传 ZIP 及旁边生成的 `.sha256` 文件。生成的 `RELEASE-MANIFEST.json` 位于 ZIP 内，列出发布文件的相对路径和 SHA256。不要上传本机 `.venv`。

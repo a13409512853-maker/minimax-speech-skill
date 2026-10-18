@@ -145,7 +145,7 @@ class VoiceCreationTests(unittest.TestCase):
                 patch.object(speech.subprocess, "run", return_value=result) as run:
             reference = speech.inspect_reference(path, "voice_clone", self.root)
         self.assertEqual(reference["duration_seconds"], 10.5)
-        self.assertEqual(run.call_args.args[0][-1], str(path))
+        self.assertTrue(Path(run.call_args.args[0][-1]).samefile(path))
         self.assertNotIn("shell", run.call_args.kwargs)
 
     def test_dry_run_never_reads_credentials_writes_output_or_calls_network(self):
