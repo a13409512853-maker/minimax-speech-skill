@@ -1,0 +1,2 @@
+websockets==17.2
+keyring>=25.6,<26; sys_platform != "win32"
