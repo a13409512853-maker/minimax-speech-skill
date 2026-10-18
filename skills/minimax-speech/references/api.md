@@ -9,10 +9,15 @@
 | 同步完整文件 | `POST https://api.minimax.cn/v1/t2a_v2` |
 | 标准 WebSocket | `wss://api.minimax.cn/ws/v1/t2a_v2` |
 | 查询音色 | `POST https://api.minimax.cn/v1/get_voice` |
+| 文字设计音色 | `POST https://api.minimax.cn/v1/voice_design` |
+| 参考音频复刻 | `POST https://api.minimax.cn/v1/voice_clone` |
+| 上传复刻素材 | `POST https://api.minimax.cn/v1/files/upload` |
 
 请求头 `Authorization: Bearer <key>`，HTTP JSON 请求另加 `Content-Type: application/json`。不需要额外 `GroupId`。脚本不允许自定义中转地址，拒绝将 API 鉴权头转发到重定向地址。
 
 HTTP 使用 `stream=false`、`output_format=hex`。音频通过 `bytes.fromhex(data.audio)` 解码，不能按 Base64 解码。HTTP 状态和 `base_resp.status_code == 0` 都需要成功。
+
+音色设计、复刻和 multipart 文件上传的参数、示例、权限与输出见 [voice-creation.md](voice-creation.md)，接口于2026-10-19核对。音色设计的 `trial_audio` 同样为 hex；复刻的 `demo_audio` 是 HTTPS 链接。不能混用解码方式。设计接口不接受模型字段，复刻试听与正式 TTS 使用 `speech-2.8-hd`。
 
 ## 本机凭据
 
@@ -77,7 +82,7 @@ python <skill>/run.py repair-websocket --out <existing-take-directory>
 
 任务已发送后发生断线或超时，不自动重试。检查已保存结果和追踪编号；音频完成但字幕下载失败时会保留音频并标记警告，不重做配音。WS 后处理失败可离线修复；缺少 `task_finished` 时拒绝把未完成流标成成功。
 
-当前脚本不实现 HTTP SSE、异步长文、音色创建、复刻或混音。需要这些功能时依据对应官方接口单独扩展，不能将当前实现误报为已覆盖。
+当前脚本不实现 HTTP SSE、异步长文或混音。音色设计与复刻通过独立子命令实现；常规配音不自动创建新音色。
 
 ## 官方依据
 

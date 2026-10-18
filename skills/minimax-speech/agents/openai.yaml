@@ -1,4 +1,4 @@
 interface:
   display_name: "MiniMax Speech 配音"
-  short_description: "通过官方 Speech 2.8 HD 生成配音，整合音色、情绪、停顿、读音与字幕"
-  default_prompt: "使用 $minimax-speech 将我的正文和声音要求转成配音，保留原稿、实际参数、音频与字幕。"
+  short_description: "官方 Speech 2.8 HD 配音、文字设计音色、授权参考音频复刻与字幕"
+  default_prompt: "使用 $minimax-speech 根据我的要求配音、设计音色或复刻授权声音，保留实际参数、音色档案和音频。"

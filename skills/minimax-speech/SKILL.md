@@ -1,11 +1,11 @@
 ---
 name: minimax-speech
-description: Generate narration, dubbing, and text-to-speech with the official MiniMax Speech 2.8 HD API. Translate voice direction into supported voice, emotion, pacing, pronunciation, and audio-tag controls; use HTTP or standard WebSocket and preserve audio, subtitles, and usage records.
+description: Generate speech with the official MiniMax Speech 2.8 HD API, design custom voices from text, or clone an authorized reference voice. Translate voice direction into supported controls; preserve reusable voice profiles, audio, subtitles, and usage records.
 ---
 
 # MiniMax Speech
 
-把用户的正文和声音要求转成可追溯的配音，固定使用官方 `speech-2.8-hd`。
+把用户的正文和声音要求转成可追溯的配音，也可设计新音色或复刻有权使用的参考声音。TTS 和复刻试听固定使用官方 `speech-2.8-hd`；音色设计接口没有模型选择字段。
 
 ## 安装后与首次使用
 
@@ -35,6 +35,24 @@ python <skill>/run.py generate --job <workspace>/job.json --out <workspace>/take
 ```
 
 复用参数时用 `--profile profile.json`，追加词典用 `--dict dictionary.json`，均可多次指定。同词不同读法会报冲突，先解决再发送。实际请求以预览和 `request.json` 为准，不能只确认词典被保存。
+
+## 设计与复刻音色
+
+用户明确要求新音色、角色声音设计或参考音频复刻时，先读 [voice-creation.md](references/voice-creation.md)，再选对应命令。只要求补充接口或安装技能时，不创建音色或上传个人录音。
+
+- `voice-design`：把语言、年龄感、音色质感和表达方向写入 `prompt`，将最多500字的试听台词放入 `preview_text`；两者不能混为普通 TTS 的正文。
+- `voice-clone`：确认用户有权上传并复刻素材后记录 `authorized: true`；检查主参考10–300秒、可选示例短于8秒，每个文件不超过20MB。WAV 可直接校验，MP3/M4A 需要 FFprobe。相对音频路径以任务 JSON 所在目录为基准。
+- 先 `--dry-run`，本地检查不读密钥、不联网。用户已要求创建或复刻时可接着执行；未授权素材或缺少实际生成请求时不自行设置授权或提交。
+- 返回目录内的 `profile.json` 可直接传给普通 TTS 的 `--profile`，继续调语速、音高、情绪和发音；这不是训练模型。音色设计的修改需要新一次设计，不能把修改描述作为 TTS 的 `prompt` 发送。
+- 保存音色ID、脱敏响应、试听和上传编号。试听下载失败时复用已创建的音色，不重复复刻。官方说明复刻音色若7天内未正式调用会被删除；提醒用户，但不为保活自行生成付费音频。
+
+```text
+python <skill>/run.py voice-design --job design.json --dry-run
+python <skill>/run.py voice-design --job design.json --out voices/design-01
+python <skill>/run.py voice-clone --job clone.json --dry-run
+python <skill>/run.py voice-clone --job clone.json --out voices/clone-01
+python <skill>/run.py generate --job narration.json --profile voices/design-01/profile.json --out takes/take-01
+```
 
 ## 凭据与结果
 

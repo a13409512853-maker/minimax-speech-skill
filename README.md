@@ -1,8 +1,8 @@
 # MiniMax Speech Skill
 
-Text-to-speech (TTS) skill using the official MiniMax Speech 2.8 HD API, for Codex and Claude Code: Chinese voiceover, speech direction, HTTP/WebSocket, subtitles, and encrypted local API credentials.
+Text-to-speech (TTS) skill using the official MiniMax Speech 2.8 HD API, for Codex and Claude Code: custom voice design, authorized voice cloning, Chinese voiceover, speech direction, HTTP/WebSocket, subtitles, and encrypted local API credentials.
 
-让 AI 使用 MiniMax 官方 **Speech 2.8 HD** 生成配音，把“声音提示词”落实为音色、情绪、语速、停顿、发音词典和支持的声音标签。支持完整 HTTP 输出与标准 WebSocket，保存音频、字幕和实际参数。
+让 AI 使用 MiniMax 官方 **Speech 2.8 HD** 生成配音，把“声音提示词”落实为音色、情绪、语速、停顿、发音词典和支持的声音标签。支持**文字设计音色**、**参考音频复刻/声音克隆**、完整 HTTP 输出与标准 WebSocket，保存可复用音色档案、音频、字幕和实际参数。
 
 这是独立开源项目，与 MiniMax 无隶属或背书关系。项目采用 [BSD Zero Clause (0BSD)](LICENSE) 许可，允许商用、修改和再分发，无署名保留条件。官方 API 服务单独计费，仍受 MiniMax 的服务条款约束；第三方依赖保留各自许可。
 
@@ -70,11 +70,37 @@ python <skill>/run.py generate --job job.json --out takes/take-01
 
 从 [job.example.json](skills/minimax-speech/references/job.example.json) 复制任务示例，确认当前账号可用音色后使用。每次生成使用新的输出目录，避免覆盖结果。WebSocket MP3/FLAC 合并需要本机 FFmpeg；HTTP 与 WebSocket PCM 不需要。
 
+## 自定义角色声音
+
+可以告诉 AI：“根据角色设定设计一个清亮、自然的年轻成年女声，生成一段试听并保存音色ID。”也可以提供自己有权使用的录音，要求复刻并复用。单纯安装技能不会上传录音或生成付费试听。
+
+从 [音色设计示例](skills/minimax-speech/references/voice-design.example.json) 或 [音色复刻示例](skills/minimax-speech/references/voice-clone.example.json) 开始。复刻前需要官方个人/企业认证，主参考为10秒至5分钟的 MP3/M4A/WAV，每个文件不超过20MB；实际取得素材授权后才能将示例的 `authorized` 改为 `true`。
+
+```text
+python <skill>/run.py voice-design --job design.json --dry-run
+python <skill>/run.py voice-design --job design.json --out voices/design-01
+python <skill>/run.py voice-clone --job clone.json --dry-run
+python <skill>/run.py voice-clone --job clone.json --out voices/clone-01
+python <skill>/run.py generate --job narration.json --profile voices/design-01/profile.json --out takes/take-01
+```
+
+`--dry-run` 不读取密钥、不联网。新音色目录的 `profile.json` 可直接用于后续配音；任务中不要再填写旧音色ID，以免覆盖该档案。支持可选短示例音频、对应文本、降噪、音量归一化与 ASR 文本校验，详见 [音色创建与复刻说明](skills/minimax-speech/references/voice-creation.md)。
+
+MP3/M4A 复刻素材的时长校验需要 FFprobe；PCM WAV 无需额外工具。复刻音色7天内未正式调用会被官方删除，不会为保活自动生成音频。
+
+## 更新安装
+
+安装器保护已有不同文件。更新前将旧技能目录备份到技能发现目录之外，例如 `~/.claude/skill-backups/minimax-speech-<timestamp>`，检查并保留个人修改，再安装到原来空出的路径。不要把备份留在活动的 `skills` 内，避免发现两份技能；不要搬用旧 `.venv`。
+
+Claude Code 可运行 `python install.py --agent claude --non-interactive --json`；Codex 若先前安装在自定义目录，应继续使用原来的 `--dest`，避免重复安装。Windows 同用户的 DPAPI 凭据保存在技能外部，更新时会复用，不要导出到仓库。安装完成运行 `onboard --json`，`ready` 时无需重新索取密钥。
+
 ## 范围与验证
 
-固定 `speech-2.8-hd`；不自动降级、不自动重试结果未知的收费请求。当前未实现异步长文、HTTP SSE、音色创建、复刻和混音。音色与自然度需要用户试听。
+TTS 和复刻试听固定 `speech-2.8-hd`，音色设计使用不含模型选择字段的官方专用接口；不自动降级、不自动重试结果未知的收费请求。当前未实现异步长文、HTTP SSE和混音。音色与自然度需要用户试听。
 
 维护者于 2026-10-18 完成过官方 HTTP 和 WebSocket 真实调用测试。公开测试使用模拟响应和虚构凭据，不包含真实密钥、音频或账号记录。Windows 加密往返可本机验证；macOS/Linux 后端有模拟测试，实际系统密钥库仍需对应平台实测。
+
+v1.1.0新增音色设计、文件上传与复刻；2026-10-19按官方文档实现并完成模拟响应测试，本次未调用收费创建接口，真实音色效果与账号权限待用户实际任务验证。
 
 无需 API 密钥的测试与发布检查：
 

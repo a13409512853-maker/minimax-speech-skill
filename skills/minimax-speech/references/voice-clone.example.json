@@ -1,0 +1,10 @@
+{
+  "authorized": false,
+  "audio_path": "reference/main.wav",
+  "voice_id": "CampusVoice001",
+  "text": "你好，欢迎来到我们的校园。今天就让我陪你一起，发现身边的小美好。",
+  "model": "speech-2.8-hd",
+  "language_boost": "Chinese",
+  "need_noise_reduction": false,
+  "need_volume_normalization": false
+}

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MiniMax Speech 2.8 HD: HTTP, standard WebSocket, and OS-encrypted credentials."""
+"""MiniMax Speech: TTS, voice design, cloning, and OS-encrypted credentials."""
 
 import argparse
 import copy
@@ -18,6 +18,7 @@ import warnings
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 import wave
 
 import credentials
@@ -26,6 +27,9 @@ MODEL = "speech-2.8-hd"
 HTTP_URL = "https://api.minimax.cn/v1/t2a_v2"
 WS_URL = "wss://api.minimax.cn/ws/v1/t2a_v2"
 VOICE_URL = "https://api.minimax.cn/v1/get_voice"
+DESIGN_URL = "https://api.minimax.cn/v1/voice_design"
+CLONE_URL = "https://api.minimax.cn/v1/voice_clone"
+UPLOAD_URL = "https://api.minimax.cn/v1/files/upload"
 EMOTIONS = {"happy", "sad", "angry", "fearful", "disgusted", "surprised", "calm"}
 TAGS = {
     "laughs", "chuckle", "coughs", "clear-throat", "groans", "breath", "pant",
@@ -50,10 +54,10 @@ def clean(value):
         for key, item in value.items():
             if key.lower() in {"authorization", "api_key", "apikey", "access_token"}:
                 result[key] = "[REDACTED]"
-            elif key == "audio" and isinstance(item, str):
+            elif key in {"audio", "trial_audio"} and isinstance(item, str):
                 result[key] = {"hex_characters": len(item)}
-            elif key == "subtitle_file" and isinstance(item, str):
-                result[key] = "[temporary subtitle URL omitted]"
+            elif key in {"subtitle_file", "demo_audio"} and isinstance(item, str):
+                result[key] = "[temporary result URL omitted]" if item else ""
             else:
                 result[key] = clean(item)
         return result
@@ -125,14 +129,14 @@ def check_response(obj):
                           f"trace_id={obj.get('trace_id', '')}")
 
 
-def post(url, payload, key, timeout=90):
+def request_json(url, data, content_type, key, timeout=90):
     # Only these fixed official endpoints receive the Authorization header.
-    if url not in {HTTP_URL, VOICE_URL}:
+    if url not in {HTTP_URL, VOICE_URL, DESIGN_URL, CLONE_URL, UPLOAD_URL}:
         raise SpeechError("Unapproved API endpoint.")
     req = urllib.request.Request(
-        url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        url, data=data,
         headers={"Authorization": "Bearer " + key,
-                 "Content-Type": "application/json"}, method="POST")
+                 "Content-Type": content_type}, method="POST")
     try:
         with urllib.request.build_opener(NoRedirect).open(req, timeout=timeout) as res:
             obj = json.load(res)
@@ -146,6 +150,11 @@ def post(url, payload, key, timeout=90):
         raise SpeechError(f"HTTP {exc.code}: {json.dumps(details, ensure_ascii=False)}")
     check_response(obj)
     return obj
+
+
+def post(url, payload, key, timeout=90):
+    return request_json(url, json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                        "application/json", key, timeout)
 
 
 def merge(base, override):
@@ -189,7 +198,7 @@ def numeric(value, low, high, name, integer=False, exclusive_low=False):
         raise SpeechError(name + " must be an integer.")
 
 
-def validate_text(text):
+def validate_text(text, tags=TAGS):
     if not isinstance(text, str) or not text.strip() or len(text) >= 10000:
         raise SpeechError("Each text must contain 1-9999 characters.")
     if "sk-api-" in text:
@@ -207,7 +216,7 @@ def validate_text(text):
     if re.search(r"<#[^>]+#>\s*<#[^>]+#>", text):
         raise SpeechError("Consecutive pauses are not supported.")
     for name in re.findall(r"\(([a-z][a-z-]*)\)", text):
-        if name not in TAGS:
+        if name not in tags:
             raise SpeechError(f"Unknown English parenthetical/tag ({name}); "
                               "remove it or use a documented tag.")
 
@@ -304,6 +313,296 @@ def resolve(config, profiles=(), dictionaries=()):
     else:
         payload["event"] = "task_start"
     return result, transport, texts, payload
+
+
+def creation_string(value, name, limit=None):
+    if not isinstance(value, str) or not value.strip():
+        raise SpeechError(name + " must be a nonempty string.")
+    if limit is not None and len(value) > limit:
+        raise SpeechError(f"{name} must contain at most {limit} characters.")
+    return value
+
+
+def creation_id(value, name):
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise SpeechError(name + " must be a positive integer.")
+    return value
+
+
+def inspect_reference(filename, purpose, base):
+    path = Path(filename).expanduser()
+    if not path.is_absolute():
+        path = base / path
+    path = path.resolve()
+    if not path.is_file() or path.suffix.lower() not in {".mp3", ".m4a", ".wav"}:
+        raise SpeechError("Reference must be an existing MP3, M4A, or WAV file.")
+    size = path.stat().st_size
+    if not 0 < size <= 20_000_000:
+        raise SpeechError("Reference must be nonempty and no larger than 20 MB.")
+    if path.suffix.lower() == ".wav":
+        try:
+            with wave.open(str(path), "rb") as audio:
+                duration = audio.getnframes() / audio.getframerate()
+                expected = audio.getnframes() * audio.getnchannels() * audio.getsampwidth()
+                actual = 0
+                while block := audio.readframes(65536):
+                    actual += len(block)
+                if actual != expected:
+                    raise SpeechError("WAV reference is truncated; no upload was sent.")
+        except (wave.Error, EOFError):
+            raise SpeechError("Cannot read WAV duration; use a valid PCM WAV.") from None
+    else:
+        probe = os.environ.get("MINIMAX_FFPROBE") or shutil.which("ffprobe")
+        if not probe:
+            ffmpeg = os.environ.get("MINIMAX_FFMPEG") or shutil.which("ffmpeg")
+            if not ffmpeg and runtime_path().is_file():
+                ffmpeg = load(runtime_path()).get("ffmpeg")
+            if ffmpeg:
+                probe = str(Path(ffmpeg).with_name(
+                    "ffprobe.exe" if os.name == "nt" else "ffprobe"))
+        if not probe or not Path(probe).is_file():
+            raise SpeechError("MP3/M4A duration checks require FFprobe. Set "
+                              "MINIMAX_FFPROBE, configure FFmpeg with FFprobe beside it, "
+                              "or supply PCM WAV.")
+        result = subprocess.run(
+            [str(probe), "-v", "error", "-show_entries", "format=duration",
+             "-of", "json", str(path)], capture_output=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode:
+            raise SpeechError("FFprobe could not read the reference audio.")
+        try:
+            duration = float(json.loads(result.stdout)["format"]["duration"])
+        except (ValueError, TypeError, KeyError):
+            raise SpeechError("Reference has no reliable audio duration.") from None
+    if purpose == "voice_clone":
+        numeric(duration, 10, 300, "main reference duration (seconds)")
+    else:
+        numeric(duration, 0, 8, "prompt reference duration (seconds)", exclusive_low=True)
+        if duration >= 8:
+            raise SpeechError("Prompt reference must be shorter than 8 seconds.")
+    return {"path": str(path), "purpose": purpose, "bytes": size,
+            "duration_seconds": duration,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def resolve_creation(config, operation, base):
+    if not isinstance(config, dict):
+        raise SpeechError("Voice creation job must be a JSON object.")
+    if "sk-api-" in json.dumps(config, ensure_ascii=False):
+        raise SpeechError("Credential-like content refused in voice creation job.")
+    boolean_fields = {"aigc_watermark"}
+    if operation == "voice-design":
+        allowed = {"prompt", "preview_text", "voice_id", *boolean_fields}
+    else:
+        boolean_fields |= {"need_noise_reduction", "need_volume_normalization"}
+        allowed = {"audio_path", "file_id", "voice_id", "authorized", "clone_prompt",
+                   "text", "model", "language_boost", "text_validation", "accuracy",
+                   *boolean_fields}
+    unknown = set(config) - allowed
+    if unknown:
+        raise SpeechError("Unsupported voice creation fields: " + ", ".join(sorted(unknown)))
+    for field in boolean_fields & config.keys():
+        if not isinstance(config[field], bool):
+            raise SpeechError(field + " must be true or false.")
+    payload, uploads = copy.deepcopy(config), []
+    if operation == "voice-design":
+        creation_string(config.get("prompt"), "prompt")
+        creation_string(config.get("preview_text"), "preview_text", 500)
+        if "voice_id" in config:
+            creation_string(config["voice_id"], "voice_id")
+        return payload, uploads
+    if config.get("authorized") is not True:
+        raise SpeechError("Set authorized=true only after the user confirms the right "
+                          "to upload and clone the reference voice.")
+    payload.pop("authorized")
+    voice_id = creation_string(config.get("voice_id"), "voice_id")
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{6,254}[A-Za-z0-9]", voice_id):
+        raise SpeechError("Clone voice_id must be 8-256 ASCII characters, start with a "
+                          "letter, contain letters/digits/-/_, and end with a letter/digit.")
+    if ("audio_path" in config) == ("file_id" in config):
+        raise SpeechError("Choose exactly one of audio_path or previously uploaded file_id.")
+    if "audio_path" in config:
+        creation_string(config["audio_path"], "audio_path")
+        uploads.append(inspect_reference(config["audio_path"], "voice_clone", base))
+        payload.pop("audio_path")
+        payload["file_id"] = "<uploaded voice_clone file_id>"
+    else:
+        creation_id(config["file_id"], "file_id")
+    if "clone_prompt" in config:
+        prompt = config["clone_prompt"]
+        if not isinstance(prompt, dict) or set(prompt) - {
+                "audio_path", "prompt_audio", "prompt_text"}:
+            raise SpeechError("clone_prompt accepts audio_path or prompt_audio, plus prompt_text.")
+        text = creation_string(prompt.get("prompt_text"), "clone_prompt.prompt_text")
+        if not re.search(r"[.!?;:。！？；：…][\"'”’）)]?$", text.rstrip()):
+            raise SpeechError("clone_prompt.prompt_text must end with punctuation.")
+        if ("audio_path" in prompt) == ("prompt_audio" in prompt):
+            raise SpeechError("Choose clone_prompt.audio_path or clone_prompt.prompt_audio.")
+        if "audio_path" in prompt:
+            creation_string(prompt["audio_path"], "clone_prompt.audio_path")
+            uploads.append(inspect_reference(prompt["audio_path"], "prompt_audio", base))
+            payload["clone_prompt"] = {"prompt_audio": "<uploaded prompt_audio file_id>",
+                                       "prompt_text": text}
+        else:
+            creation_id(prompt["prompt_audio"], "clone_prompt.prompt_audio")
+    if "text" in config:
+        creation_string(config["text"], "text", 1000)
+        validate_text(config["text"], TAGS | {"whistles", "crying", "applause"})
+        if config.get("model", MODEL) != MODEL:
+            raise SpeechError("Clone preview model is fixed to " + MODEL + ".")
+        payload["model"] = MODEL
+    elif "model" in config:
+        raise SpeechError("model is only used with clone preview text.")
+    if "language_boost" in config:
+        creation_string(config["language_boost"], "language_boost")
+    if "text_validation" in config:
+        creation_string(config["text_validation"], "text_validation", 200)
+    if "accuracy" in config:
+        if "text_validation" not in config:
+            raise SpeechError("accuracy requires text_validation.")
+        numeric(config["accuracy"], 0, 1, "accuracy")
+    return payload, uploads
+
+
+def upload_reference(reference, key):
+    path = Path(reference["path"])
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != reference["sha256"]:
+        raise SpeechError("Reference changed since validation; no upload was sent.")
+    boundary = "minimax-speech-" + uuid.uuid4().hex
+    purpose = reference["purpose"]
+    # A generic filename keeps personal local paths out of multipart headers.
+    header = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"purpose\"\r\n\r\n"
+              f"{purpose}\r\n--{boundary}\r\n"
+              f"Content-Disposition: form-data; name=\"file\"; "
+              f"filename=\"reference{path.suffix.lower()}\"\r\n"
+              "Content-Type: application/octet-stream\r\n\r\n").encode("ascii")
+    body = header + raw + f"\r\n--{boundary}--\r\n".encode("ascii")
+    return request_json(UPLOAD_URL, body, "multipart/form-data; boundary=" + boundary,
+                        key, timeout=180)
+
+
+def audio_extension(raw):
+    if raw.startswith(b"RIFF") and raw[8:12] == b"WAVE":
+        return "wav"
+    if raw.startswith(b"fLaC"):
+        return "flac"
+    if raw.startswith(b"OggS"):
+        return "ogg"
+    if len(raw) >= 12 and raw[4:8] == b"ftyp":
+        return "m4a"
+    if raw.startswith(b"ID3") or (len(raw) > 1 and raw[0] == 255 and raw[1] & 224 == 224):
+        return "mp3"
+    return "bin"
+
+
+def download_demo(url):
+    if not isinstance(url, str) or urllib.parse.urlsplit(url).scheme != "https":
+        raise SpeechError("Preview download requires HTTPS.")
+    # Signed result downloads never receive the API key.
+    with urllib.request.build_opener(NoRedirect).open(url, timeout=45) as response:
+        raw = response.read(50_000_001)
+    if not raw or len(raw) > 50_000_000:
+        raise SpeechError("Preview download was empty or exceeded 50 MB.")
+    return raw
+
+
+def create_voice(args):
+    source = Path(args.job).resolve()
+    resolved = load(source)
+    payload, uploads = resolve_creation(resolved, args.command, source.parent)
+    endpoint = DESIGN_URL if args.command == "voice-design" else CLONE_URL
+    if args.dry_run:
+        print(json.dumps(clean({
+            "operation": args.command, "endpoint": endpoint, "request": payload,
+            "uploads": uploads, "network_request": False,
+            "note": "Upload placeholders are replaced with official file_id values before submission.",
+        }), ensure_ascii=False, indent=2))
+        return
+    if not args.out:
+        raise SpeechError("--out NEW_DIRECTORY is required unless --dry-run is used.")
+    key = key_for(args.credential_file)
+    out = Path(args.out).resolve()
+    out.mkdir(parents=True, exist_ok=False)
+    dump(out / "resolved-job.json", resolved)
+    dump(out / "request.json", payload)
+    state = {"operation": args.command, "endpoint": endpoint, "created_at": now(),
+             "status": "prepared", "uploaded_files": [], "voice_created": False}
+    dump(out / "job.json", state)
+    try:
+        for reference in uploads:
+            purpose = reference["purpose"]
+            state.update(status="upload_submitted_result_unknown", upload_purpose=purpose)
+            dump(out / "job.json", state)
+            response = upload_reference(reference, key)
+            dump(out / ("upload-" + purpose + ".json"), response)
+            file_id = creation_id((response.get("file") or {}).get("file_id"), "uploaded file_id")
+            state["uploaded_files"].append(
+                {"file_id": file_id, **{k: v for k, v in reference.items() if k != "path"}})
+            if purpose == "voice_clone":
+                payload["file_id"] = file_id
+            else:
+                payload["clone_prompt"]["prompt_audio"] = file_id
+            state["status"] = "upload_complete"
+            dump(out / "request.json", payload)
+            dump(out / "job.json", state)
+        state["status"] = "submitted_result_unknown"
+        dump(out / "job.json", state)
+        response = post(endpoint, payload, key, timeout=180)
+        dump(out / "response.json", response)
+        if args.command == "voice-clone":
+            sensitive = response.get("input_sensitive")
+            if sensitive is True or (isinstance(sensitive, dict) and sensitive.get("type", 0)) \
+                    or response.get("input_sensitive_type", 0):
+                raise SpeechError("Official service flagged the reference; voice creation unconfirmed.")
+        voice_id = creation_string(
+            response.get("voice_id") if args.command == "voice-design" else payload["voice_id"],
+            "returned voice_id")
+        state.update(status="voice_created", voice_id=voice_id, voice_created=True,
+                     trace_id=response.get("trace_id"), extra_info=response.get("extra_info", {}))
+        dump(out / "job.json", state)
+        dump(out / "voice.json", {"voice_id": voice_id, "operation": args.command,
+                                  "created_at": state["created_at"], "tts_model": MODEL})
+        dump(out / "profile.json", {"voice_id": voice_id, "model": MODEL})
+        notes = []
+        try:
+            if args.command == "voice-design":
+                audio = response.get("trial_audio")
+                if not isinstance(audio, str) or not audio:
+                    raise SpeechError("Voice created, but no trial_audio was returned.")
+                raw = bytes.fromhex(audio)
+            elif "text" in payload:
+                raw = download_demo(response.get("demo_audio"))
+            else:
+                raw = None
+            if raw is not None:
+                if not raw:
+                    raise SpeechError("Voice created, but preview audio is empty.")
+                extension = audio_extension(raw)
+                filename = "preview." + extension
+                (out / filename).write_bytes(raw)
+                state.update(preview_audio=filename, audio_bytes=len(raw),
+                             audio_sha256=hashlib.sha256(raw).hexdigest(),
+                             listening_review="pending")
+                if extension == "bin":
+                    notes.append("Preview preserved as binary; codec could not be identified.")
+        except Exception as exc:
+            notes.append("Voice created; preview could not be saved: " + str(clean(str(exc))))
+        if args.command == "voice-clone":
+            state["retention_note"] = (
+                "Official docs: cloned voices unused for formal TTS within 7 days are deleted. "
+                "Creation/preview is not recorded as formal TTS use; no automatic activation.")
+        state.update(status="completed_with_warnings" if notes else "completed",
+                     warnings=notes, finished_at=now())
+    except (Exception, KeyboardInterrupt) as exc:
+        state.update(status="voice_created_with_error" if state["voice_created"]
+                     else "failed_or_result_unknown", error=clean(str(exc)), finished_at=now(),
+                     retry_note="No automatic retry. Inspect saved responses and uploaded file IDs "
+                                "before another request; reuse a created voice instead of recreating it.")
+        dump(out / "job.json", state)
+        raise
+    dump(out / "job.json", state)
+    print(json.dumps(clean({"output": str(out), **state}), ensure_ascii=False, indent=2))
 
 
 def subtitle_rows(obj):
@@ -588,6 +887,12 @@ def main():
                         default="system")
     voices.add_argument("--out", required=True)
     voices.add_argument("--search", default="")
+    for name in ("voice-design", "voice-clone"):
+        cmd = commands.add_parser(name, help="Create a custom voice with the official API")
+        cmd.add_argument("--job", required=True)
+        cmd.add_argument("--out", help="New output directory")
+        cmd.add_argument("--dry-run", action="store_true",
+                         help="Validate and preview locally, without credentials or network")
     for name in ("preview", "generate"):
         cmd = commands.add_parser(name)
         cmd.add_argument("--job", required=True)
@@ -596,6 +901,8 @@ def main():
         if name == "generate":
             cmd.add_argument("--out", required=True, help="New output directory")
     args = parser.parse_args()
+    if args.command in {"voice-design", "voice-clone"}:
+        return create_voice(args)
     if args.command == "configure-runtime":
         executable = Path(args.ffmpeg).resolve()
         if not executable.is_file():

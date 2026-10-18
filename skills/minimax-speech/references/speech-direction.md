@@ -62,7 +62,7 @@ happy sad angry fearful disgusted surprised calm
 
 ## 音色设计分支
 
-仅在用户需要新音色时另行使用官方 `/v1/voice_design`。这是另一项外部操作，当前脚本没有实现；普通配音流程不默认调用。
+用户需要新音色时使用 `voice-design`，需要复刻授权素材时使用 `voice-clone`。先读 [voice-creation.md](voice-creation.md)；普通配音流程不默认调用创建接口。
 
 可参考的描述结构：语言/口音、声音年龄感、音色质感、表达方式、使用场景。示例：
 

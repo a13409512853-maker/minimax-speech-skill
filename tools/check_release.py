@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = {"README.md", "AGENTS.md", "LICENSE", ".gitignore", "install.py",
           "skills", "tests", "tools", "docs", ".github", "RELEASE-MANIFEST.json"}
 IGNORED = {".git", ".venv", "__pycache__", ".pytest_cache", "dist", "build"}
-FORBIDDEN_SUFFIX = {".dpapi", ".mp3", ".wav", ".flac", ".pcm", ".srt", ".vtt",
+FORBIDDEN_SUFFIX = {".dpapi", ".mp3", ".m4a", ".wav", ".flac", ".ogg", ".pcm", ".srt", ".vtt",
                     ".pyd", ".exe", ".dll"}
 KEY = re.compile(rb"sk-(?:api-)?[A-Za-z0-9_-]{24,}")
 USER_PATH = re.compile(rb"(?:[A-Za-z]:[\\/]+Users[\\/]+[^\\/\s\"']+|/[U]sers/[^/\s\"']+)")
@@ -61,7 +61,7 @@ def collect(root):
 
 def build(root, destination):
     entries = collect(root)
-    manifest = {"version": "1.0.0",
+    manifest = {"version": "1.1.0",
                 "files": {name: hashlib.sha256(data).hexdigest()
                           for name, data in entries.items()}}
     if destination:
